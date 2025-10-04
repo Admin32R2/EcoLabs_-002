@@ -1,0 +1,11 @@
+{
+  "name": "ecolabs-site",
+  "version": "0.1.0",
+  "private": true,
+  "devDependencies": {
+    "tailwindcss": "^3.5.0"
+  },
+  "scripts": {
+    "build:css": "npx tailwindcss -i ./src/styles.css -o ./dist/styles.css --minify"
+  }
+}

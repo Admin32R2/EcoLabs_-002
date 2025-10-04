@@ -1,0 +1,6 @@
+/* Logo sizing / navbar helpers */
+.ecolabs-logo { height: 28px; width: auto; display: inline-block; }
+@media (max-width: 640px) {
+	.ecolabs-logo { height: 22px; }
+}
+
