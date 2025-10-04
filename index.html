@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GriTech - Farmer Dashboard (Demo)</title>
+
+  <!-- Tailwind CDN (play CDN for quick setup) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Tailwind config for theme
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            gri: {
+              50: '#f6fffa',
+              100: '#ecfff2',
+              200: '#cfffe0',
+              300: '#a6ffd0',
+              400: '#66f2a8',
+              500: '#34d08b',
+              600: '#2aa46f',
+              700: '#1f7b53',
+              800: '#14513a',
+              900: '#073320'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- React + ReactDOM + Router from jsDelivr (pinned) -->
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- removed react-router-dom UMD due to CDN/MIME issues; using a tiny internal hash router instead -->
+
+  <style>
+    /* Small custom styles */
+    html, body, #root { height: 100%; }
+    body { background: linear-gradient(180deg, #f9fff9 0%, #ffffff 100%); }
+    .card-shadow { box-shadow: 0 8px 20px rgba(6,95,70,0.08); }
+    input[type=file]::-webkit-file-upload-button { cursor: pointer; }
+  </style>
+</head>
+<body class="antialiased text-gray-800">
+  <div id="root"></div>
+
+  <script type="text/javascript">
+    // Using React from global
+    const { useState, useEffect, useRef } = React;
+    const { createRoot } = ReactDOM;
+
+    // --- Tiny hash router (local) ---
+    const getHashPath = () => (location.hash && location.hash.slice(1)) || '/';
+    function useHashPath(){ const [path, setPath] = useState(getHashPath()); useEffect(()=>{ const handler = ()=>setPath(getHashPath()); window.addEventListener('hashchange', handler); return ()=>window.removeEventListener('hashchange', handler); }, []); return path; }
+    const Link = ({to, children, className, ...rest}) => React.createElement('a', Object.assign({href:'#'+to, className}, rest), children);
+    const useNavigate = () => { return (to)=> { location.hash = to; }; };
+
+    // --- Helpers ---
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+    const loadJSON = (k, fallback) => { try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch(e){ return fallback; } }
+    const saveJSON = (k,v) => localStorage.setItem(k, JSON.stringify(v));
+
+    // Seed sample posts if none
+    (function seedSample(){
+      try{
+        const p = loadJSON('gri_posts', null);
+        if(!p || p.length===0){
+          const sample = [{
+            id: uid(), farmerId: 'demo', createdAt: Date.now(),
+            images: ['data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=400 height=300><rect width=100% height=100% fill=%22%2334d08b%22/><text x=50% y=50% dominant-baseline=middle text-anchor=middle font-size=24 fill=white>Tomatoes</text></svg>'],
+            caption: 'Fresh vine-ripened tomatoes, harvested this morning.', price:45, unit:'kilo', location:'Green Valley'
+          },{
+            id: uid(), farmerId: 'demo', createdAt: Date.now()-3600, images: ['data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=400 height=300><rect width=100% height=100% fill=%22%232aa46f%22/><text x=50% y=50% dominant-baseline=middle text-anchor=middle font-size=24 fill=white>Eggs</text></svg>'], caption:'Free-range eggs, dozen pack.', price:180, unit:'pair', location:'Farm Lane'
+          }];
+          saveJSON('gri_posts', sample);
+        }
+      }catch(e){/* ignore */}
+    })();
+
+    // Remove all existing orders on startup (clear demo orders)
+    (function clearAllOrdersOnStartup(){
+      try{ saveJSON('gri_orders', []); }catch(e){/* ignore */}
+    })();
+
+    // --- Simple modal/popup helper ---
+    function ensureModalRoot(){
+      if(document.getElementById('gri-modal-root')) return document.getElementById('gri-modal-root');
+      const root = document.createElement('div'); root.id = 'gri-modal-root'; document.body.appendChild(root);
+      return root;
+    }
+    function showSuccessPopup(title, message, onClose){
+      const root = ensureModalRoot();
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = `
+        <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:60">
+          <div style="position:absolute;inset:0;background:rgba(0,0,0,0.35)"></div>
+          <div style="background:#fff;border-radius:12px;padding:18px;max-width:420px;width:90%;box-shadow:0 10px 30px rgba(2,6,23,0.2);position:relative;text-align:center">
+            <h3 style="margin:0 0 8px;color:#064e3b;font-size:18px">${title}</h3>
+            <p style="color:#064e3b;margin:0 0 12px">${message}</p>
+            <button id="gri-modal-ok" style="background:#16a34a;color:#fff;border:none;padding:10px 14px;border-radius:8px;font-weight:600;">OK</button>
+          </div>
+        </div>
+      `;
+      root.appendChild(wrapper);
+      const btn = wrapper.querySelector('#gri-modal-ok');
+      btn.focus();
+      const cleanup = ()=>{ root.removeChild(wrapper); if(typeof onClose === 'function') onClose(); };
+      btn.addEventListener('click', cleanup);
+      return cleanup;
+    }
+
+    // --- Mock auth (two roles) ---
+    const useAuth = () => {
+      const [user, setUser] = useState(() => loadJSON('gri_user', null));
+      useEffect(() => saveJSON('gri_user', user), [user]);
+      const login = (role, name) => setUser({ id: uid(), role, name });
+      const logout = () => setUser(null);
+      return { user, login, logout };
+    }
+
+    // --- App Shell ---
+    function App(){
+      const auth = useAuth();
+      const path = useHashPath();
+      // simple route match
+      let content = null;
+      if(path === '/' ) content = React.createElement(Home);
+      else if(path === '/login') content = React.createElement(Login, {onLogin: auth.login});
+      else if(path.startsWith('/farmer')){
+        // route to farmer app with optional subpath
+        let view = 'dashboard';
+        if(path === '/farmer/posts') view = 'posts';
+        if(path === '/farmer/orders') view = 'orders';
+        if(path === '/farmer/delivery') view = 'delivery';
+        content = React.createElement(RequireRole, {role:'farmer', user:auth.user, children: React.createElement(FarmerApp, {user:auth.user, view})});
+      } else content = React.createElement(NotFound);
+
+      return (
+        React.createElement('div', {className:'min-h-screen flex flex-col'} ,
+          React.createElement(Navbar, {user: auth.user, onLogout: auth.logout}),
+          React.createElement('main', {className:'flex-1 p-4'}, content),
+          React.createElement('footer', {className:'p-4 text-center text-sm text-gray-500'}, 'GriTech demo — mobile-first farmer interface')
+        )
+      )
+    }
+
+    function RequireRole({role, user, children}){
+      const navigate = useNavigate();
+      useEffect(()=>{
+        if(!user){ navigate('/login'); }
+        else if(user.role !== role){ navigate('/'); }
+      }, [user, role]);
+      return user && user.role === role ? children : React.createElement('div', {className:'py-8 text-center'}, 'Redirecting...');
+    }
+
+    // --- Navbar ---
+    function Navbar({user, onLogout}){
+      return (
+        React.createElement('header', {className:'bg-white border-b sticky top-0 z-20'},
+          React.createElement('div', {className:'max-w-3xl mx-auto flex items-center justify-between p-3'},
+            React.createElement(Link, {to:'/', className:'flex items-center gap-3'},
+              React.createElement('div', {className:'w-10 h-10 rounded-full bg-gradient-to-r from-gri-400 to-gri-600 flex items-center justify-center text-white font-bold'}, 'G'),
+              React.createElement('div', {className:'hidden sm:block'},
+                React.createElement('div', {className:'font-semibold text-lg'}, 'GriTech'),
+                React.createElement('div', {className:'text-xs text-gray-500 -mt-1'}, 'Farm to Table')
+              )
+            ),
+            React.createElement('nav', {className:'flex items-center gap-2'},
+              React.createElement(Link, {to:'/', className:'px-3 py-2 rounded-md text-sm hover:bg-gray-100'}, 'Home'),
+              React.createElement(Link, {to:'/farmer/posts', className:'px-3 py-2 rounded-md text-sm hover:bg-gray-100'}, 'My Posts'),
+              React.createElement(Link, {to:'/farmer/orders', className:'px-3 py-2 rounded-md text-sm hover:bg-gray-100'}, 'Orders'),
+              user ? (
+                React.createElement('div', {className:'flex items-center gap-2'},
+                  React.createElement('span', {className:'text-sm text-gray-600 hidden sm:inline'}, user.name),
+                  React.createElement('button', {onClick: onLogout, className:'bg-gri-500 text-white px-3 py-2 rounded-md text-sm'}, 'Logout')
+                )
+              ) : (
+                React.createElement(Link, {to:'/login', className:'bg-gri-500 text-white px-3 py-2 rounded-md text-sm'}, 'Login')
+              )
+            )
+          )
+        )
+      )
+    }
+
+    function Home(){
+      return React.createElement('div', {className:'max-w-3xl mx-auto'},
+        React.createElement('div', {className:'p-4 rounded-lg card-shadow bg-white'},
+          React.createElement('h2', {className:'text-xl font-semibold text-gri-700'}, 'Welcome to GriTech'),
+          React.createElement('p', {className:'mt-2 text-gray-600'}, 'This demo focuses on the Farmer interface. Use the login page to sign in as a Farmer or Consumer (mock).')
+        )
+      )
+    }
+
+    function NotFound(){ return React.createElement('div', {className:'max-w-3xl mx-auto text-center p-8'}, 'Page not found'); }
+
+    // --- Login ---
+    function Login({onLogin}){
+      const [role, setRole] = useState('farmer');
+      const [name, setName] = useState('Farmer John');
+      const nav = useNavigate();
+      const submit = (e) => { e.preventDefault(); onLogin(role, name); nav(role==='farmer'?'/farmer':'/'); }
+      return (
+        React.createElement('div', {className:'max-w-2xl mx-auto'},
+          React.createElement('form', {onSubmit: submit, className:'bg-white p-4 rounded-lg card-shadow space-y-4'},
+            React.createElement('h3', {className:'text-lg font-semibold text-gri-700'}, 'Mock Login'),
+            React.createElement('div', null,
+              React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Name'),
+              React.createElement('input', {value:name, onChange:e=>setName(e.target.value), className:'w-full border rounded p-2'}),
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Role'),
+              React.createElement('select', {value:role, onChange:e=>setRole(e.target.value), className:'w-full border rounded p-2'},
+                React.createElement('option', {value:'farmer'}, 'Farmer'),
+                React.createElement('option', {value:'consumer'}, 'Consumer')
+              )
+            ),
+            React.createElement('div', {className:'flex gap-2'},
+              React.createElement('button', {type:'submit', className:'flex-1 bg-gri-500 text-white py-2 rounded-lg'}, 'Sign In'),
+              React.createElement(Link, {to:'/', className:'flex-1 text-center border rounded-lg py-2'}, 'Cancel')
+            )
+          )
+        )
+      )
+    }
+
+    // --- Farmer App (Dashboard, Posts, Orders, Delivery) ---
+    function FarmerApp({user, view='dashboard'}){
+      const [routeView, setRouteView] = useState(view);
+      useEffect(()=> setRouteView(view), [view]);
+      return (
+        React.createElement('div', {className:'max-w-3xl mx-auto space-y-4'},
+          React.createElement('div', {className:'flex items-center justify-between gap-2'},
+            React.createElement('h2', {className:'text-xl font-semibold text-gri-700'}, user.name + "'s Dashboard"),
+            React.createElement('div', {className:'flex gap-2'},
+              React.createElement(Link, {to:'/farmer/posts', className:`px-3 py-2 rounded-md text-sm ${routeView==='posts'?'bg-gri-600 text-white':''}`}, 'Posts'),
+              React.createElement(Link, {to:'/farmer/orders', className:`px-3 py-2 rounded-md text-sm ${routeView==='orders'?'bg-gri-600 text-white':''}`}, 'Orders'),
+              React.createElement(Link, {to:'/farmer/delivery', className:`px-3 py-2 rounded-md text-sm ${routeView==='delivery'?'bg-gri-600 text-white':''}`}, 'Delivery')
+            )
+          ),
+          routeView === 'orders' ? React.createElement(OrdersPage, {user}) :
+          routeView === 'delivery' ? React.createElement(DeliveryPage, {user}) :
+          React.createElement(PostsPage, {user})
+        )
+      )
+    }
+
+    // --- Posts Page ---
+    function PostsPage({user}){
+      const [posts, setPosts] = useState(()=> loadJSON('gri_posts', []));
+      useEffect(()=> saveJSON('gri_posts', posts), [posts]);
+
+      const addPost = (post) => setPosts(prev => [{...post, id: uid(), createdAt: Date.now(), farmerId: user.id}, ...prev]);
+      const updatePost = (id, patch) => setPosts(prev => prev.map(p=>p.id===id?{...p,...patch}:p));
+      const deletePost = (id) => setPosts(prev => prev.filter(p=>p.id!==id));
+
+      return (
+        React.createElement('div', null,
+          React.createElement(NewPostForm, {onAdd: addPost}),
+          React.createElement('div', {className:'space-y-3 mt-4 pb-20'},
+            posts.length === 0 ? React.createElement('div', {className:'text-center text-gray-500 p-8 bg-white rounded card-shadow'}, 'No posts yet — create one!') : posts.map(post => React.createElement(PostCard, {key:post.id, post, onEdit: updatePost, onDelete: deletePost}))
+          )
+        )
+      )
+    }
+
+    // --- Status Badge ---
+    function StatusBadge({status}){
+      const s = (status||'pending').toLowerCase();
+      let cls = 'bg-gray-100 text-gray-800';
+      let text = status;
+      if(s === 'pending') { cls = 'bg-yellow-100 text-yellow-800'; text = 'Pending'; }
+      else if(s === 'accepted') { cls = 'bg-blue-100 text-blue-800'; text = 'Accepted'; }
+      else if(s === 'preparing') { cls = 'bg-orange-100 text-orange-800'; text = 'Preparing'; }
+      else if(s === 'in-transit' || s === 'in transit') { cls = 'bg-indigo-100 text-indigo-800'; text = 'In Transit'; }
+      else if(s === 'delivered') { cls = 'bg-green-100 text-green-800'; text = 'Delivered'; }
+      else if(s === 'payment_confirmed') { cls = 'bg-purple-100 text-purple-800'; text = 'Payment Confirmed'; }
+      else if(s === 'declined') { cls = 'bg-red-100 text-red-800'; text = 'Declined'; }
+      return React.createElement('div', {className:`text-xs px-2 py-0.5 rounded-full ${cls}`}, text);
+    }
+
+    function NewPostForm({onAdd}){
+      const [images, setImages] = useState([]);
+      const [caption, setCaption] = useState('');
+      const [price, setPrice] = useState('');
+      const [unit, setUnit] = useState('kilo');
+      const [location, setLocation] = useState('');
+      const fileRef = useRef();
+
+      const handleFiles = (files) => {
+        const arr = Array.from(files).slice(0,4);
+        Promise.all(arr.map(f => new Promise((res)=>{ const r = new FileReader(); r.onload = e=>res(e.target.result); r.readAsDataURL(f); }))).then(dataURLs=> setImages(prev=>[...prev, ...dataURLs]));
+      }
+
+      const submit = (e) => {
+        e.preventDefault();
+        if(!images.length){ alert('Please add at least one photo.'); return; }
+        if(!price){ alert('Set a price.'); return; }
+        onAdd({ images, caption, price: parseFloat(price), unit, location });
+        setImages([]); setCaption(''); setPrice(''); setUnit('kilo'); setLocation(''); if(fileRef.current) fileRef.current.value = '';
+      }
+
+      return (
+        React.createElement('form', {onSubmit: submit, className:'bg-white p-4 rounded-lg card-shadow space-y-3'},
+          React.createElement('h3', {className:'font-semibold text-gri-700'}, 'Post Produce'),
+
+          React.createElement('div', null,
+            React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Photos (up to 4)'),
+            React.createElement('input', {ref:fileRef, type:'file', accept:'image/*', multiple:true, onChange:e=>handleFiles(e.target.files), className:'w-full text-sm'}),
+            images.length>0 && React.createElement('div', {className:'flex gap-2 mt-2 overflow-x-auto'}, images.map((src,i)=> React.createElement('img', {key:i, src, className:'w-24 h-24 object-cover rounded'})))
+          ),
+
+          React.createElement('div', null,
+            React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Description'),
+            React.createElement('textarea', {value:caption, onChange:e=>setCaption(e.target.value), className:'w-full border rounded p-2', placeholder:'Tell buyers about your produce... (variety, freshness, harvest date)'}),
+          ),
+
+          React.createElement('div', {className:'grid grid-cols-2 gap-2'},
+            React.createElement('div', null,
+              React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Price'),
+              React.createElement('input', {value:price, onChange:e=>setPrice(e.target.value), inputMode:'numeric', className:'w-full border rounded p-2', placeholder:'e.g., 50.00'})
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Unit'),
+              React.createElement('select', {value:unit, onChange:e=>setUnit(e.target.value), className:'w-full border rounded p-2'},
+                React.createElement('option', {value:'kilo'}, 'per kilo'),
+                React.createElement('option', {value:'pair'}, 'per pair')
+              )
+            )
+          ),
+
+          React.createElement('div', null,
+            React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Location'),
+            React.createElement('input', {value:location, onChange:e=>setLocation(e.target.value), className:'w-full border rounded p-2', placeholder:'e.g., Town, Farm area'}),
+            React.createElement('div', {className:'text-xs text-gray-400 mt-1'}, 'Manual location for now — GPS integration later')
+          ),
+
+          React.createElement('div', {className:'flex gap-2'},
+            React.createElement('button', {type:'submit', className:'flex-1 bg-gri-500 text-white py-3 rounded-lg font-semibold'}, 'Post'),
+            React.createElement('button', {type:'button', className:'flex-1 border rounded-lg py-3', onClick:()=>{ setImages([]); setCaption(''); setPrice(''); setUnit('kilo'); setLocation(''); if(fileRef.current) fileRef.current.value=''; }}, 'Clear')
+          )
+        )
+      )
+    }
+
+    function PostCard({post, onEdit, onDelete}){
+      const [editing, setEditing] = useState(false);
+      const [caption, setCaption] = useState(post.caption);
+      const [price, setPrice] = useState(post.price);
+      const [unit, setUnit] = useState(post.unit);
+      const [location, setLocation] = useState(post.location);
+      const navigate = useNavigate();
+
+      useEffect(()=>{ setCaption(post.caption); setPrice(post.price); setUnit(post.unit); setLocation(post.location); }, [post]);
+
+      const save = () => { onEdit(post.id, {caption, price, unit, location}); setEditing(false); }
+      return (
+        React.createElement('div', {className:'bg-white rounded-lg p-3 card-shadow'},
+          React.createElement('div', {className:'flex gap-3'},
+            React.createElement('div', {className:'w-20 h-20 flex-shrink-0 overflow-hidden rounded'}, post.images && post.images[0] ? React.createElement('img', {src:post.images[0], className:'w-full h-full object-cover'}) : React.createElement('div', {className:'w-full h-full bg-gray-100 flex items-center justify-center text-sm text-gray-400'}, 'No photo')),
+            React.createElement('div', {className:'flex-1'},
+              editing ? React.createElement('div', null,
+                React.createElement('input', {value:caption, onChange:e=>setCaption(e.target.value), className:'w-full border rounded p-1 mb-1'}),
+                React.createElement('div', {className:'flex gap-1'},
+                  React.createElement('input', {value:price, onChange:e=>setPrice(e.target.value), className:'w-1/2 border rounded p-1'}),
+                  React.createElement('select', {value:unit, onChange:e=>setUnit(e.target.value), className:'w-1/2 border rounded p-1'}, React.createElement('option', {value:'kilo'}, 'per kilo'), React.createElement('option', {value:'pair'}, 'per pair')),
+                ),
+                React.createElement('input', {value:location, onChange:e=>setLocation(e.target.value), className:'w-full border rounded p-1 mt-1'}),
+                React.createElement('div', {className:'flex gap-2 mt-2'},
+                  React.createElement('button', {onClick:save, className:'bg-gri-500 text-white px-3 py-1 rounded'}, 'Save'),
+                  React.createElement('button', {onClick:()=>setEditing(false), className:'border px-3 py-1 rounded'}, 'Cancel')
+                )
+              ) : React.createElement('div', null,
+                React.createElement('div', {className:'text-sm text-gray-700 mb-1'}, post.caption || React.createElement('span', {className:'text-gray-400'}, 'No description')),
+                React.createElement('div', {className:'text-sm font-semibold text-gri-700'}, `₦ ${Number(post.price).toFixed(2)} ${post.unit==='kilo'?' /kg':' /pair'}`),
+                React.createElement('div', {className:'text-xs text-gray-500 mt-1'}, post.location)
+              )
+            )
+          ),
+          React.createElement('div', {className:'flex gap-2 mt-3'},
+            React.createElement('button', {onClick:()=>setEditing(true), className:'flex-1 border py-2 rounded text-sm'}, 'Edit'),
+            React.createElement('button', {onClick:()=>{ if(confirm('Delete this post?')) onDelete(post.id); }, className:'flex-1 bg-red-500 text-white py-2 rounded text-sm'}, 'Delete'),
+            React.createElement('button', {onClick:()=>{
+              const ordersList = loadJSON('gri_orders', []);
+              const qty = 1;
+              const total = Number(post.price || 0) * qty;
+              const order = { id: uid(), buyerName: 'Demo Buyer', location: 'Local Market', postRef: post.id, quantity: qty, unit: post.unit, total, status: 'pending', createdBy: 'simulation', createdAt: Date.now() };
+              ordersList.unshift(order);
+              saveJSON('gri_orders', ordersList);
+              navigate('/farmer/orders');
+            }, className:'flex-1 bg-gri-500 text-white py-2 rounded text-sm'}, 'Simulate Order')
+          )
+        )
+      )
+    }
+
+    // --- Orders Page ---
+    function OrdersPage({user}){
+      const [orders, setOrders] = useState(()=> loadJSON('gri_orders', []));
+      useEffect(()=> saveJSON('gri_orders', orders), [orders]);
+      const navigate = useNavigate();
+      const accept = (id) => setOrders(prev=> { const next = prev.map(o=>o.id===id?{...o, status:'accepted'}:o); saveJSON('gri_orders', next); return next; });
+      const decline = (id) => setOrders(prev=> { const next = prev.map(o=>o.id===id?{...o, status:'declined'}:o); saveJSON('gri_orders', next); return next; });
+
+      return (
+        React.createElement('div', null,
+          orders.length===0 ? React.createElement('div', {className:'bg-white rounded p-4 card-shadow text-center text-gray-500'}, 'No orders yet') :
+          React.createElement('div', null, orders.map(o => {
+            const isSim = o.createdBy === 'simulation';
+            return React.createElement('div', {key:o.id, className:`bg-white rounded p-3 card-shadow mb-3 ${isSim ? 'border-l-4 border-gri-500' : ''}`},
+              React.createElement('div', {className:'flex items-center justify-between'},
+                React.createElement('div', null,
+                  React.createElement('div', {className:'flex items-center gap-2'}, React.createElement('div', {className:'font-semibold'}, o.buyerName), isSim && React.createElement(StatusBadge, {status: 'Pending'})),
+                  React.createElement('div', {className:'text-sm text-gray-500'}, o.location)
+                ),
+                React.createElement('div', {className:'text-right'},
+                  React.createElement('div', {className:'text-sm font-semibold text-gri-700'}, `₦ ${Number(o.total).toFixed(2)}`),
+                  React.createElement('div', {className:'text-xs text-gray-500'}, `${o.quantity} ${o.unit}`),
+                  React.createElement('div', {className:'mt-1'}, React.createElement(StatusBadge, {status: o.status}))
+                )
+              ),
+              React.createElement('div', {className:'mt-3 flex gap-2'},
+                o.status==='pending' ? React.createElement(React.Fragment, null,
+                  React.createElement('button', {onClick:()=>accept(o.id), className:'flex-1 bg-gri-500 text-white py-2 rounded'}, 'Accept'),
+                  React.createElement('button', {onClick:()=>navigate('/farmer/delivery'), className:'flex-1 border py-2 rounded text-center'}, 'Arrange Delivery')
+                ) : React.createElement('div', {className:'text-sm text-gray-600'}, `Status: ${o.status}`)
+              )
+            );
+          }))
+        )
+      )
+    }
+
+    // --- Delivery Page ---
+    function DeliveryPage({user}){
+      const [orders, setOrders] = useState(()=> loadJSON('gri_orders', []));
+      useEffect(()=> saveJSON('gri_orders', orders), [orders]);
+
+      const setDelivery = (id, mode) => setOrders(prev => {
+        const next = prev.map(o=> o.id===id ? {...o, delivery:mode} : o);
+        saveJSON('gri_orders', next);
+        return next;
+      });
+
+      // Start a simulated delivery progression for an order
+      const startDelivery = (id) => {
+        // preparing -> in-transit -> delivered -> payment_confirmed
+        setOrders(prev => { const next = prev.map(o=>o.id===id?{...o, status:'preparing'}:o); saveJSON('gri_orders', next); return next; });
+        setTimeout(()=>{
+          setOrders(prev => { const next = prev.map(o=>o.id===id?{...o, status:'in-transit'}:o); saveJSON('gri_orders', next); return next; });
+        }, 2000);
+        setTimeout(()=>{
+          setOrders(prev => { const next = prev.map(o=>o.id===id?{...o, status:'delivered'}:o); saveJSON('gri_orders', next); return next; });
+        }, 5000);
+        setTimeout(()=>{
+          setOrders(prev => { const next = prev.map(o=>o.id===id?{...o, status:'payment_confirmed'}:o); saveJSON('gri_orders', next); return next; });
+        }, 7000);
+      };
+
+  const confirmDelivered = (id) => setOrders(prev => { const next = prev.map(o=>o.id===id?{...o, status:'delivered'}:o); saveJSON('gri_orders', next); return next; });
+
+      const confirmPaymentAndRemove = (id) => {
+        showSuccessPopup('Payment Confirmed', '🎉 Yay — you have successfully sold a produce!', ()=>{
+          setOrders(prev => { const next = prev.filter(o=>o.id!==id); saveJSON('gri_orders', next); return next; });
+        });
+      };
+
+      return (
+        React.createElement('div', null,
+          orders.length===0 ? React.createElement('div', {className:'bg-white rounded p-4 card-shadow text-center text-gray-500'}, 'No orders to manage') :
+          React.createElement('div', null, orders.map(o => {
+            const isSim = o.createdBy === 'simulation';
+            return React.createElement('div', {key:o.id, className:`bg-white rounded p-3 card-shadow mb-3 ${isSim ? 'border-l-4 border-gri-500' : ''}`},
+              React.createElement('div', {className:'flex items-center justify-between'},
+                React.createElement('div', null,
+                  React.createElement('div', {className:'flex items-center gap-2'}, React.createElement('div', {className:'font-semibold'}, o.buyerName), isSim && React.createElement('div', null, React.createElement(StatusBadge, {status: 'Pending'}))),
+                  React.createElement('div', {className:'text-sm text-gray-500'}, o.location)
+                ),
+                React.createElement('div', {className:'text-right'},
+                  React.createElement('div', {className:'text-sm font-semibold text-gri-700'}, `₦ ${Number(o.total).toFixed(2)}`),
+                  React.createElement('div', {className:'text-xs text-gray-500'}, `${o.quantity} ${o.unit}`),
+                  React.createElement('div', {className:'mt-1'}, React.createElement(StatusBadge, {status: o.status}))
+                )
+              ),
+              React.createElement('div', {className:'mt-3 space-y-2'},
+                React.createElement('div', {className:'flex gap-2'},
+                  React.createElement('button', {onClick:()=>setDelivery(o.id,'self'), className:`flex-1 py-2 rounded ${o.delivery==='self'?'bg-gri-600 text-white':'border'}`}, 'Self Deliver'),
+                  React.createElement('button', {onClick:()=>setDelivery(o.id,'ecolabs'), className:`flex-1 py-2 rounded ${o.delivery==='ecolabs'?'bg-gri-600 text-white':'border'}`}, 'EcoLabs Delivery')
+                ),
+                React.createElement('div', {className:'flex gap-2'},
+                  // Show Start Delivery if delivery chosen and not yet started
+                  (o.delivery && o.status && (o.status === 'accepted' || o.status === 'pending')) ? React.createElement('button', {onClick:()=>startDelivery(o.id), className:'flex-1 bg-gri-500 text-white py-2 rounded'}, 'Start Delivery') : null,
+                  // Show Confirm Payment when payment_confirmed
+                  o.status === 'payment_confirmed' ? React.createElement('button', {onClick:()=>confirmPaymentAndRemove(o.id), className:'flex-1 bg-purple-600 text-white py-2 rounded'}, 'Confirm Payment & Remove') : React.createElement('div', {className:'flex-1 text-right'}, React.createElement(StatusBadge, {status: o.status}))
+                )
+              )
+            );
+          }))
+        )
+      )
+    }
+
+    // --- Render ---
+    try{
+      const root = createRoot(document.getElementById('root'));
+      root.render(React.createElement(App));
+    }catch(err){
+      console.error('React mount failed', err);
+      const el = document.getElementById('root');
+      if(el){ el.innerHTML = '<div style="padding:20px;font-family:sans-serif;color:#7f1d1d;background:#fff7f7;border:1px solid #fca5a5;border-radius:8px;max-width:800px;margin:24px auto">\n        <h3 style="color:#991b1b">App failed to load</h3>\n        <pre style="white-space:pre-wrap;color:#6b2118">'+(err && err.message?err.message:String(err))+'</pre>\n        <div style="margin-top:8px;color:#444">Open the browser console for more details.</div>\n      </div>'; }
+    }
+
+  </script>
+</body>
+</html>
