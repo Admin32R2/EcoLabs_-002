@@ -81,13 +81,26 @@
     function showSuccessPopup(title, message, onClose){
       const root = ensureModalRoot();
       const wrapper = document.createElement('div');
+      // If no title is provided, render a single centered line (message) for a cleaner confirmation
+      const content = title ?
+        `<h3 style="margin:0 0 8px;color:#335232;font-size:18px">${title}</h3><p style="color:#335232;margin:0 0 12px">${message}</p>` :
+        `
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <circle cx="12" cy="12" r="11" fill="#e6f7ec"/>
+              <path d="M16 9l-4.2 4.8L8 11.8" stroke="#2f8f45" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div style="font-size:18px;font-weight:700;color:#153524;margin:0">${message}</div>
+          </div>`;
+
       wrapper.innerHTML = `
         <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:60">
           <div style="position:absolute;inset:0;background:rgba(0,0,0,0.35)"></div>
           <div style="background:#fff;border-radius:12px;padding:18px;max-width:420px;width:90%;box-shadow:0 10px 30px rgba(2,6,23,0.2);position:relative;text-align:center">
-            <h3 style="margin:0 0 8px;color:#335232;font-size:18px">${title}</h3>
-            <p style="color:#335232;margin:0 0 12px">${message}</p>
-            <button id="ecolabs-modal-ok" style="background:#7fa36a;color:#fff;border:none;padding:10px 14px;border-radius:8px;font-weight:600;">OK</button>
+            ${content}
+            <div style="margin-top:12px">
+              <button id="ecolabs-modal-ok" style="background:#fff;color:#2f8f45;border:1px solid #d7edd9;padding:6px 10px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer">Close</button>
+            </div>
           </div>
         </div>
       `;
@@ -277,6 +290,7 @@
       const [caption, setCaption] = useState('');
       const [price, setPrice] = useState('');
       const [unit, setUnit] = useState('kilo');
+      const [available, setAvailable] = useState('1');
       const [location, setLocation] = useState('');
       const fileRef = useRef();
 
@@ -289,8 +303,11 @@
         e.preventDefault();
         if(!images.length){ alert('Please add at least one photo.'); return; }
         if(!price){ alert('Set a price.'); return; }
-        onAdd({ images, caption, price: parseFloat(price), unit, location });
+        const availNum = parseInt(available, 10) || 0;
+        if(availNum <= 0){ alert('Set available kilos/pairs (must be 1 or more).'); return; }
+        onAdd({ images, caption, price: parseFloat(price), unit, location, available: availNum });
         setImages([]); setCaption(''); setPrice(''); setUnit('kilo'); setLocation(''); if(fileRef.current) fileRef.current.value = '';
+        setAvailable('1');
       }
 
       return (
@@ -323,6 +340,12 @@
           ),
 
           React.createElement('div', null,
+            React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Available (kilos or pairs)'),
+            React.createElement('input', {value:available, onChange:e=>setAvailable(e.target.value), inputMode:'numeric', className:'w-full border rounded p-2', placeholder:'e.g., 10'}),
+            React.createElement('div', {className:'text-xs text-gray-400 mt-1'}, 'Quantity available for sale (used when simulating orders)')
+          ),
+
+          React.createElement('div', null,
             React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Location'),
             React.createElement('input', {value:location, onChange:e=>setLocation(e.target.value), className:'w-full border rounded p-2', placeholder:'e.g., Town, Farm area'}),
             React.createElement('div', {className:'text-xs text-gray-400 mt-1'}, 'Manual location for now — GPS integration later')
@@ -339,14 +362,15 @@
     function PostCard({post, onEdit, onDelete}){
       const [editing, setEditing] = useState(false);
       const [caption, setCaption] = useState(post.caption);
-      const [price, setPrice] = useState(post.price);
-      const [unit, setUnit] = useState(post.unit);
-      const [location, setLocation] = useState(post.location);
+  const [price, setPrice] = useState(post.price);
+  const [unit, setUnit] = useState(post.unit);
+  const [location, setLocation] = useState(post.location);
+  const [available, setAvailable] = useState(post.available || 1);
       const navigate = useNavigate();
 
-      useEffect(()=>{ setCaption(post.caption); setPrice(post.price); setUnit(post.unit); setLocation(post.location); }, [post]);
+  useEffect(()=>{ setCaption(post.caption); setPrice(post.price); setUnit(post.unit); setLocation(post.location); setAvailable(post.available || 1); }, [post]);
 
-      const save = () => { onEdit(post.id, {caption, price, unit, location}); setEditing(false); }
+  const save = () => { onEdit(post.id, {caption, price, unit, location, available}); setEditing(false); }
       return (
         React.createElement('div', {className:'bg-white rounded-lg p-3 card-shadow'},
           React.createElement('div', {className:'flex gap-3'},
@@ -359,13 +383,18 @@
                   React.createElement('select', {value:unit, onChange:e=>setUnit(e.target.value), className:'w-1/2 border rounded p-1'}, React.createElement('option', {value:'kilo'}, 'per kilo'), React.createElement('option', {value:'pair'}, 'per pair')),
                 ),
                 React.createElement('input', {value:location, onChange:e=>setLocation(e.target.value), className:'w-full border rounded p-1 mt-1'}),
+                React.createElement('div', {className:'mt-2'},
+                  React.createElement('label', {className:'text-sm text-gray-600 block mb-1'}, 'Available (kilos/pairs)'),
+                  React.createElement('input', {value:available, onChange:e=>setAvailable(e.target.value), className:'w-full border rounded p-1', inputMode:'numeric'})
+                ),
                 React.createElement('div', {className:'flex gap-2 mt-2'},
                   React.createElement('button', {onClick:save, className:'bg-ecolabs-500 text-white px-3 py-1 rounded'}, 'Save'),
                   React.createElement('button', {onClick:()=>setEditing(false), className:'border px-3 py-1 rounded'}, 'Cancel')
                 )
               ) : React.createElement('div', null,
                 React.createElement('div', {className:'text-sm text-gray-700 mb-1'}, post.caption || React.createElement('span', {className:'text-gray-400'}, 'No description')),
-                React.createElement('div', {className:'text-sm font-semibold text-ecolabs-700'}, `₦ ${Number(post.price).toFixed(2)} ${post.unit==='kilo'?' /kg':' /pair'}`),
+            React.createElement('div', {className:'text-sm font-semibold text-ecolabs-700'}, `PHP ${Number(post.price).toFixed(2)} ${post.unit==='kilo'?' /kg':' /pair'}`),
+            React.createElement('div', {className:'text-xs text-gray-500 mt-1'}, `Available: ${post.available || 1} ${post.unit}`),
                 React.createElement('div', {className:'text-xs text-gray-500 mt-1'}, post.location)
               )
             )
@@ -374,14 +403,17 @@
             React.createElement('button', {onClick:()=>setEditing(true), className:'flex-1 border py-2 rounded text-sm'}, 'Edit'),
             React.createElement('button', {onClick:()=>{ if(confirm('Delete this post?')) onDelete(post.id); }, className:'flex-1 bg-red-500 text-white py-2 rounded text-sm'}, 'Delete'),
             React.createElement('button', {onClick:()=>{
+              // Simulate buyer quantity as a random integer between 1 and post.available
+              const max = (post.available && Number.isFinite(post.available) && post.available > 0) ? Math.floor(post.available) : 1;
+              const qty = Math.floor(Math.random() * max) + 1; // 1..max
+
               const ordersList = loadJSON('ecolabs_orders', []);
-              const qty = 1;
               const total = Number(post.price || 0) * qty;
               const order = { id: uid(), buyerName: 'Demo Buyer', location: 'Local Market', postRef: post.id, quantity: qty, unit: post.unit, total, status: 'pending', createdBy: 'simulation', createdAt: Date.now() };
               ordersList.unshift(order);
               saveJSON('ecolabs_orders', ordersList);
               navigate('/farmer/orders');
-            }, className:'flex-1 bg-ecolabs-500 text-white py-2 rounded text-sm'}, 'Simulate Order')
+            }, className:'flex-1 bg-ecolabs-500 text-white py-2 rounded text-sm'}, 'Go to Order')
           )
         )
       )
@@ -407,7 +439,7 @@
                   React.createElement('div', {className:'text-sm text-gray-500'}, o.location)
                 ),
                 React.createElement('div', {className:'text-right'},
-                  React.createElement('div', {className:'text-sm font-semibold text-ecolabs-700'}, `₦ ${Number(o.total).toFixed(2)}`),
+                  React.createElement('div', {className:'text-sm font-semibold text-ecolabs-700'}, `PHP ${Number(o.total).toFixed(2)}`),
                   React.createElement('div', {className:'text-xs text-gray-500'}, `${o.quantity} ${o.unit}`),
                   React.createElement('div', {className:'mt-1'}, React.createElement(StatusBadge, {status: o.status}))
                 )
@@ -458,7 +490,15 @@
         const order = ordersList.find(o => o.id === id);
         const postRef = order ? order.postRef : null;
 
-        showSuccessPopup('Payment Confirmed', '🎉 Yay — you have successfully sold a produce!', ()=>{
+  if(!order){ showSuccessPopup('', 'Payment successful.'); return; }
+
+  // compute 5% fee and net amount received
+  const totalAmt = Number(order.total) || 0;
+  const fee = Math.round((totalAmt * 0.05) * 100) / 100; // round to cents
+  const net = Math.round((totalAmt - fee) * 100) / 100;
+  const message = `Payment successful — PHP ${net.toFixed(2)} received`;
+
+  showSuccessPopup('', message, ()=>{
           // remove the order
           setOrders(prev => { const next = prev.filter(o=>o.id!==id); saveJSON('ecolabs_orders', next); return next; });
 
@@ -485,7 +525,7 @@
                   React.createElement('div', {className:'text-sm text-gray-500'}, o.location)
                 ),
                 React.createElement('div', {className:'text-right'},
-                  React.createElement('div', {className:'text-sm font-semibold text-ecolabs-700'}, `₦ ${Number(o.total).toFixed(2)}`),
+                  React.createElement('div', {className:'text-sm font-semibold text-ecolabs-700'}, `PHP ${Number(o.total).toFixed(2)}`),
                   React.createElement('div', {className:'text-xs text-gray-500'}, `${o.quantity} ${o.unit}`),
                   React.createElement('div', {className:'mt-1'}, React.createElement(StatusBadge, {status: o.status}))
                 )
